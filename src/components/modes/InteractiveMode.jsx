@@ -100,9 +100,9 @@ const InteractiveMode = ({
       const newNodes = JSON.parse(cleanedText);
       
       if (Array.isArray(newNodes)) {
-        // Get canvas dimensions
-        const canvasWidth = canvasRef.current?.clientWidth || window.innerWidth;
-        const canvasHeight = canvasRef.current?.clientHeight || window.innerHeight;
+        // Get canvas dimensions - use viewport if canvas not yet mounted
+        const canvasWidth = canvasRef.current?.clientWidth || (window.innerWidth - 100);
+        const canvasHeight = canvasRef.current?.clientHeight || (window.innerHeight - 200);
         
         // Calculate center of canvas
         const centerX = canvasWidth / 2;
@@ -288,6 +288,23 @@ const InteractiveMode = ({
           const newConnections = otherNodes.map(n => ({ from: root.id, to: n.id }));
           setConnections(newConnections);
         }
+        
+        // Scroll to center the root node in viewport after a short delay
+        setTimeout(() => {
+          if (canvasRef.current && root) {
+            const rootNode = positionedNodes.find(n => n.id === root.id);
+            if (rootNode) {
+              const canvasRect = canvasRef.current.getBoundingClientRect();
+              const scrollX = rootNode.x + 125 - canvasRect.width / 2;
+              const scrollY = rootNode.y + 100 - canvasRect.height / 2;
+              canvasRef.current.scrollTo({
+                left: Math.max(0, scrollX),
+                top: Math.max(0, scrollY),
+                behavior: 'smooth'
+              });
+            }
+          }
+        }, 100);
       }
     } catch (e) {
       console.error("Failed to generate nodes", e);
@@ -328,7 +345,23 @@ const InteractiveMode = ({
       setMousePos({ x, y });
 
       if (draggingNode) {
-        setNodes(nodes.map(n => n.id === draggingNode.id ? { ...n, x: x - draggingNode.offsetX, y: y - draggingNode.offsetY } : n));
+        const nodeWidth = 250;
+        const nodeHeight = 200;
+        const padding = 20;
+        
+        // Get canvas dimensions
+        const canvasWidth = canvasRef.current?.clientWidth || window.innerWidth;
+        const canvasHeight = canvasRef.current?.clientHeight || window.innerHeight;
+        
+        // Calculate new position
+        let newX = x - draggingNode.offsetX;
+        let newY = y - draggingNode.offsetY;
+        
+        // Constrain to canvas bounds
+        newX = Math.max(padding, Math.min(canvasWidth - nodeWidth - padding, newX));
+        newY = Math.max(padding, Math.min(canvasHeight - nodeHeight - padding, newY));
+        
+        setNodes(nodes.map(n => n.id === draggingNode.id ? { ...n, x: newX, y: newY } : n));
       }
     }
   };
@@ -356,8 +389,15 @@ const InteractiveMode = ({
 
   const addNode = async (type) => {
     const id = Date.now();
-    const startX = Math.random() * 400 + 100;
-    const startY = Math.random() * 300 + 100;
+    const canvasWidth = canvasRef.current?.clientWidth || (window.innerWidth - 100);
+    const canvasHeight = canvasRef.current?.clientHeight || (window.innerHeight - 200);
+    const nodeWidth = 250;
+    const nodeHeight = 200;
+    const padding = 20;
+    
+    // Place new node in visible area, avoiding overlap
+    const startX = Math.max(padding, Math.min(canvasWidth - nodeWidth - padding, Math.random() * (canvasWidth - nodeWidth - 2 * padding) + padding));
+    const startY = Math.max(padding, Math.min(canvasHeight - nodeHeight - padding, Math.random() * (canvasHeight - nodeHeight - 2 * padding) + padding));
     let content = 'New Node';
     let title = 'Untitled';
     let theme = 'default';
@@ -428,7 +468,8 @@ const InteractiveMode = ({
 
       <div 
         ref={canvasRef} 
-        className="flex-1 overflow-hidden relative cursor-grab active:cursor-grabbing perspective-1000" 
+        className="flex-1 overflow-auto relative cursor-grab active:cursor-grabbing perspective-1000 custom-scrollbar" 
+        style={{ minHeight: 0 }}
       >
         <div className="absolute inset-0 z-0 opacity-30 pointer-events-none" 
           style={{ 

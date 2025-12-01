@@ -83,9 +83,9 @@ const IdeateMode = ({ setSearchQuery, setActiveTab }) => {
   };
 
   return (
-    <div className="flex h-full p-8 flex-col items-center justify-center relative overflow-hidden">
+    <div className="flex h-full p-8 flex-col items-center justify-start relative overflow-y-auto custom-scrollbar">
       {/* Background is now handled by App.jsx for full screen coverage */}
-      <div className="z-10 max-w-6xl w-full flex flex-col gap-8">
+      <div className="z-10 max-w-6xl w-full flex flex-col gap-8 py-4">
         <div className="text-center">
           <h2 className="text-4xl font-bold text-white mb-4 drop-shadow-[0_0_30px_rgba(255,255,255,0.3)]">Topic Generator</h2>
           <p className="text-white/80 text-lg">Enter a broad subject to generate specific research inquiries.</p>
