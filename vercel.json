@@ -6,8 +6,8 @@
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/api/serpapi/(.*)",
-      "destination": "https://serpapi.com/$1"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }

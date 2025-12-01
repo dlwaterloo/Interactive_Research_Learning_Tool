@@ -43,26 +43,19 @@ export const generateGeminiResponse = async (prompt) => {
 };
 
 // SerpAPI Helper for Google Scholar searches
-// Uses Vite proxy to avoid CORS issues
+// Uses serverless function in production, Vite proxy in development
 export const searchGoogleScholar = async (query) => {
-  if (!serpApiKey) {
-    throw new Error("SerpAPI key is not configured. Please set VITE_SERPAPI_KEY in your .env file.");
-  }
-
   try {
-    // Use proxy in development, direct URL in production (if CORS allows)
-    const isDev = import.meta.env.DEV;
-    const apiUrl = isDev 
-      ? `/api/serpapi/search.json?engine=google_scholar&q=${encodeURIComponent(query)}&api_key=${serpApiKey}`
-      : `https://serpapi.com/search.json?engine=google_scholar&q=${encodeURIComponent(query)}&api_key=${serpApiKey}`;
+    // Use serverless function API route (works in both dev and production)
+    const apiUrl = `/api/serpapi?q=${encodeURIComponent(query)}`;
     
     console.log("Fetching from SerpAPI:", query);
     const response = await fetch(apiUrl);
     
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("SerpAPI Response Error:", response.status, errorText);
-      throw new Error(`HTTP Error: ${response.status} ${response.statusText}. ${errorText}`);
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      console.error("SerpAPI Response Error:", response.status, errorData);
+      throw new Error(errorData.error || `HTTP Error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
@@ -76,10 +69,6 @@ export const searchGoogleScholar = async (query) => {
     return data;
   } catch (error) {
     console.error("SerpAPI Error:", error);
-    // Provide more helpful error message
-    if (error.message.includes('CORS') || error.message.includes('Failed to fetch')) {
-      throw new Error("CORS error: SerpAPI requests must go through a proxy. Please ensure the Vite dev server is running with proxy configuration.");
-    }
     throw error;
   }
 };
