@@ -6,10 +6,16 @@ import {
 import ChatModal from './ChatModal';
 import { generateGeminiResponse } from '../utils/api';
 
-const LearningModulesSidebar = ({ className = "", modules, setModules }) => {
+const LearningModulesSidebar = ({ className = "", modules, setModules, notes = {}, articles = [], activeArticle = null, setActiveArticle = null }) => {
   const [activeTaskState, setActiveTaskState] = useState(null);
   const [expandedModule, setExpandedModule] = useState(modules[0]?.id || 'keywords');
   const [showChat, setShowChat] = useState(false);
+  const [showMyNotes, setShowMyNotes] = useState(false);
+  const [showSavedResources, setShowSavedResources] = useState(false);
+  const [showCitationHelper, setShowCitationHelper] = useState(false);
+  
+  // Get saved articles from articles that have been marked as saved
+  const savedArticles = articles.filter(a => a.saved === true);
 
   const calculateProgress = () => {
     let totalXp = 0;
@@ -266,9 +272,24 @@ const LearningModulesSidebar = ({ className = "", modules, setModules }) => {
             <div className="bg-white/10 border border-white/20 rounded-2xl p-4 backdrop-blur-md mt-6">
               <h3 className="text-white font-bold text-sm mb-3">Your Toolkit</h3>
               <div className="space-y-2">
-                <button className="w-full text-left px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/90 text-xs font-bold flex items-center gap-2 transition-colors border border-white/5"><FileText size={14} className="text-[#8A5EFD]"/> My Notes</button>
-                <button className="w-full text-left px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/90 text-xs font-bold flex items-center gap-2 transition-colors border border-white/5"><Bookmark size={14} className="text-[#8A5EFD]"/> Saved Resources</button>
-                <button className="w-full text-left px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/90 text-xs font-bold flex items-center gap-2 transition-colors border border-white/5"><Quote size={14} className="text-[#8A5EFD]"/> Citation Helper</button>
+                <button 
+                  onClick={() => setShowMyNotes(true)}
+                  className="w-full text-left px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/90 text-xs font-bold flex items-center gap-2 transition-colors border border-white/5"
+                >
+                  <FileText size={14} className="text-[#8A5EFD]"/> My Notes
+                </button>
+                <button 
+                  onClick={() => setShowSavedResources(true)}
+                  className="w-full text-left px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/90 text-xs font-bold flex items-center gap-2 transition-colors border border-white/5"
+                >
+                  <Bookmark size={14} className="text-[#8A5EFD]"/> Saved Resources
+                </button>
+                <button 
+                  onClick={() => setShowCitationHelper(true)}
+                  className="w-full text-left px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/90 text-xs font-bold flex items-center gap-2 transition-colors border border-white/5"
+                >
+                  <Quote size={14} className="text-[#8A5EFD]"/> Citation Helper
+                </button>
               </div>
             </div>
 
@@ -286,6 +307,119 @@ const LearningModulesSidebar = ({ className = "", modules, setModules }) => {
       </div>
 
       {showChat && <ChatModal onClose={() => setShowChat(false)} />}
+      
+      {/* My Notes Modal */}
+      {showMyNotes && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowMyNotes(false)}>
+          <div className="bg-gradient-to-br from-[#6b21a8]/95 via-[#4c1d95]/95 to-[#0937B8]/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                <FileText size={24} className="text-[#8A5EFD]"/> My Notes
+              </h3>
+              <button onClick={() => setShowMyNotes(false)} className="text-white/60 hover:text-white">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4">
+              {Object.keys(notes).length === 0 ? (
+                <p className="text-white/60 text-center py-8">No notes yet. Start taking notes on articles to see them here.</p>
+              ) : (
+                Object.entries(notes).map(([articleId, articleNotes]) => {
+                  const article = articles.find(a => a.id === articleId);
+                  return (
+                    <div key={articleId} className="bg-white/10 border border-white/20 rounded-xl p-4">
+                      <h4 className="text-white font-bold mb-2">{article?.title || `Article ${articleId}`}</h4>
+                      {articleNotes.patterns && (
+                        <div className="mb-2">
+                          <span className="text-xs font-bold text-[#8A5EFD] uppercase">Patterns:</span>
+                          <p className="text-white/80 text-sm mt-1">{articleNotes.patterns}</p>
+                        </div>
+                      )}
+                      {articleNotes.thesis_impact && (
+                        <div className="mb-2">
+                          <span className="text-xs font-bold text-[#8A5EFD] uppercase">Thesis Impact:</span>
+                          <p className="text-white/80 text-sm mt-1">{articleNotes.thesis_impact}</p>
+                        </div>
+                      )}
+                      {articleNotes.gaps && (
+                        <div>
+                          <span className="text-xs font-bold text-[#8A5EFD] uppercase">Gaps:</span>
+                          <p className="text-white/80 text-sm mt-1">{articleNotes.gaps}</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Saved Resources Modal */}
+      {showSavedResources && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowSavedResources(false)}>
+          <div className="bg-gradient-to-br from-[#6b21a8]/95 via-[#4c1d95]/95 to-[#0937B8]/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                <Bookmark size={24} className="text-[#8A5EFD]"/> Saved Resources
+              </h3>
+              <button onClick={() => setShowSavedResources(false)} className="text-white/60 hover:text-white">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
+              {savedArticles.length === 0 ? (
+                <p className="text-white/60 text-center py-8">No saved resources yet. Swipe up on paper cards to save them.</p>
+              ) : (
+                savedArticles.map((article) => (
+                  <div key={article.id} className="bg-white/10 border border-white/20 rounded-xl p-4 hover:bg-white/15 transition-colors cursor-pointer" onClick={() => { if (setActiveArticle) setActiveArticle(article); setShowSavedResources(false); }}>
+                    <h4 className="text-white font-bold mb-1">{article.title}</h4>
+                    <p className="text-white/60 text-xs mb-2">{article.author} • {article.year} • {article.journal}</p>
+                    <p className="text-white/80 text-sm line-clamp-2">{article.summary || article.abstract}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Citation Helper Modal */}
+      {showCitationHelper && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowCitationHelper(false)}>
+          <div className="bg-gradient-to-br from-[#6b21a8]/95 via-[#4c1d95]/95 to-[#0937B8]/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                <Quote size={24} className="text-[#8A5EFD]"/> Citation Helper
+              </h3>
+              <button onClick={() => setShowCitationHelper(false)} className="text-white/60 hover:text-white">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4">
+              {articles.length === 0 ? (
+                <p className="text-white/60 text-center py-8">No articles to cite yet. Search for papers first.</p>
+              ) : (
+                articles.map((article) => {
+                  const citation = `${article.author} (${article.year}). ${article.title}. ${article.journal}. ${article.doi_url || ''}`;
+                  return (
+                    <div key={article.id} className="bg-white/10 border border-white/20 rounded-xl p-4">
+                      <h4 className="text-white font-bold mb-2 text-sm">{article.title}</h4>
+                      <div className="bg-black/20 p-3 rounded-lg mb-2">
+                        <p className="text-white/90 text-xs font-serif leading-relaxed">{citation}</p>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          navigator.clipboard.writeText(citation);
+                          // Could add a toast notification here
+                        }}
+                        className="w-full py-2 bg-[#8A5EFD] hover:bg-[#7c3aed] text-white rounded-lg text-xs font-bold transition-colors"
+                      >
+                        Copy Citation
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

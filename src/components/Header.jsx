@@ -1,7 +1,7 @@
-import { ArrowLeft, Brain, Sparkles, User } from 'lucide-react';
+import { ArrowLeft, Brain, Sparkles, User, RotateCcw } from 'lucide-react';
 import ProfileImage from './ui/ProfileImage';
 
-const Header = ({ showBack = false, onBack, userName, userRole, setUserName, setUserRole }) => (
+const Header = ({ showBack = false, onBack, onRestart, userName, userRole, setUserName, setUserRole }) => (
   <header className="mx-6 mt-6 mb-2 rounded-full bg-gradient-to-r from-[#7c3aed] to-[#1e40af] text-white flex items-center justify-between px-8 py-3 z-30 shrink-0 relative shadow-xl hover:shadow-2xl transition-all duration-300 ring-1 ring-white/20">
     <div className="flex items-center gap-3">
       {showBack && (
@@ -20,6 +20,15 @@ const Header = ({ showBack = false, onBack, userName, userRole, setUserName, set
       <h1 className="text-2xl font-black tracking-tighter drop-shadow-lg">QUIREY</h1>
     </div>
     <div className="flex items-center gap-4">
+      {onRestart && (
+        <button 
+          onClick={onRestart}
+          className="p-2 bg-white/10 hover:bg-white/20 rounded-xl transition-all group"
+          title="Restart - Go back to title screen"
+        >
+          <RotateCcw size={18} className="text-white group-hover:rotate-180 transition-transform duration-500"/>
+        </button>
+      )}
       <div className="flex flex-col items-end">
         <input 
           value={userName}

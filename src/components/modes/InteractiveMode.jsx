@@ -35,6 +35,48 @@ const InteractiveMode = ({
     }
   }, []);
 
+  // Auto-generate canvas when activeArticle is set (e.g., from Research mode)
+  // Regenerate if activeArticle changes (different paper selected)
+  const prevArticleIdRef = useRef(null);
+  const lastGeneratedArticleRef = useRef(null);
+  
+  useEffect(() => {
+    if (activeArticle && !isGenerating && !searchQuery) {
+      // Get unique identifier for the article
+      const articleId = activeArticle.id || activeArticle.title || JSON.stringify(activeArticle);
+      const prevArticleId = prevArticleIdRef.current;
+      const lastGeneratedId = lastGeneratedArticleRef.current;
+      
+      // Regenerate if:
+      // 1. This is a different article than before
+      // 2. Canvas is empty
+      // 3. We haven't generated for this article yet (even if same ID, might be different instance)
+      const shouldRegenerate = articleId !== lastGeneratedId || nodes.length === 0;
+      
+      if (shouldRegenerate) {
+        // Clear existing nodes when switching to a new article
+        if (articleId !== lastGeneratedId) {
+          setNodes([]);
+          setConnections([]);
+        }
+        
+        // Small delay to ensure component is mounted
+        const timer = setTimeout(async () => {
+          await generateCanvasNodes();
+          // Mark this article as generated after successful generation
+          lastGeneratedArticleRef.current = articleId;
+        }, 100);
+        
+        prevArticleIdRef.current = articleId;
+        return () => clearTimeout(timer);
+      }
+    } else if (!activeArticle) {
+      // Reset refs when no article is selected
+      prevArticleIdRef.current = null;
+      lastGeneratedArticleRef.current = null;
+    }
+  }, [activeArticle, isGenerating, searchQuery]);
+
   const generateCanvasNodes = async () => {
     setIsGenerating(true);
     const context = activeArticle 
@@ -44,13 +86,13 @@ const InteractiveMode = ({
     const prompt = `Generate a JSON concept map for ${context}.
     Return ONLY a JSON array of objects with this structure (no markdown code blocks):
     [
-      { "id": 1, "type": "note", "theme": "thesis", "x": 400, "y": 50, "content": "The central research question or thesis statement.", "title": "Central Thesis" },
-      { "id": 2, "type": "note", "theme": "evidence", "x": 100, "y": 300, "content": "Key supporting argument 1.", "title": "Supporting Evidence" },
-      { "id": 3, "type": "note", "theme": "evidence", "x": 320, "y": 300, "content": "Key supporting argument 2.", "title": "Supporting Evidence" },
-      { "id": 4, "type": "note", "theme": "counter", "x": 540, "y": 300, "content": "A counter-argument or contrasting view.", "title": "Counter Argument" },
-      { "id": 5, "type": "chart", "theme": "data", "x": 760, "y": 300, "content": "Chart", "title": "Key Data Point" }
+      { "id": 1, "type": "note", "theme": "thesis", "content": "The central research question or thesis statement.", "title": "Central Thesis" },
+      { "id": 2, "type": "note", "theme": "evidence", "content": "Key supporting argument 1.", "title": "Supporting Evidence" },
+      { "id": 3, "type": "note", "theme": "evidence", "content": "Key supporting argument 2.", "title": "Supporting Evidence" },
+      { "id": 4, "type": "note", "theme": "counter", "content": "A counter-argument or contrasting view.", "title": "Counter Argument" },
+      { "id": 5, "type": "chart", "theme": "data", "content": "Chart", "title": "Key Data Point" }
     ]
-    Ensure coordinates (x, y) are spaced out nicely in a tree structure. Use unique numeric IDs.`;
+    Do NOT include x and y coordinates. Just provide the node data. Use unique numeric IDs.`;
 
     try {
       const response = await generateGeminiResponse(prompt);
@@ -58,12 +100,192 @@ const InteractiveMode = ({
       const newNodes = JSON.parse(cleanedText);
       
       if (Array.isArray(newNodes)) {
-        setNodes(newNodes);
-        const root = newNodes.find(n => n.theme === 'thesis');
+        // Get canvas dimensions
+        const canvasWidth = canvasRef.current?.clientWidth || window.innerWidth;
+        const canvasHeight = canvasRef.current?.clientHeight || window.innerHeight;
+        
+        // Calculate center of canvas
+        const centerX = canvasWidth / 2;
+        const centerY = canvasHeight / 2;
+        
+        // Node dimensions
+        const nodeWidth = 250;
+        const nodeHeight = 200;
+        const padding = 100;
+        const minDistance = Math.max(nodeWidth, nodeHeight) + 40; // Minimum distance between nodes
+        const levelSpacing = 350; // Distance between hierarchy levels
+        
+        // Find root node (thesis or first node)
+        const root = newNodes.find(n => n.theme === 'thesis') || newNodes[0];
+        const otherNodes = newNodes.filter(n => n.id !== root.id);
+        
+        // Group nodes by theme for better organization
+        const nodesByTheme = {};
+        otherNodes.forEach(node => {
+          const theme = node.theme || 'default';
+          if (!nodesByTheme[theme]) {
+            nodesByTheme[theme] = [];
+          }
+          nodesByTheme[theme].push(node);
+        });
+        
+        const themes = Object.keys(nodesByTheme);
+        const totalNodes = otherNodes.length;
+        
+        // Position root at center, ensuring it's within bounds
+        const rootX = Math.max(padding, Math.min(canvasWidth - nodeWidth - padding, centerX - nodeWidth / 2));
+        const rootY = Math.max(padding, Math.min(canvasHeight - nodeHeight - padding, centerY - nodeHeight / 2));
+        const positionedNodes = [{
+          ...root,
+          x: rootX,
+          y: rootY
+        }];
+        
+        // Helper function to check if a position overlaps with existing nodes
+        const checkOverlap = (x, y, existingNodes) => {
+          // First check if position is within screen bounds
+          if (x < padding || y < padding || 
+              x + nodeWidth > canvasWidth - padding || 
+              y + nodeHeight > canvasHeight - padding) {
+            return true; // Out of bounds counts as overlap
+          }
+          
+          for (const existing of existingNodes) {
+            const ex = existing.x;
+            const ey = existing.y;
+            
+            // Check if rectangles overlap (with buffer)
+            const buffer = 10; // Small buffer to prevent touching
+            const overlapX = !(x + nodeWidth + buffer < ex || x - buffer > ex + nodeWidth);
+            const overlapY = !(y + nodeHeight + buffer < ey || y - buffer > ey + nodeHeight);
+            if (overlapX && overlapY) {
+              return true;
+            }
+            
+            // Also check minimum distance between centers
+            const centerX1 = x + nodeWidth / 2;
+            const centerY1 = y + nodeHeight / 2;
+            const centerX2 = ex + nodeWidth / 2;
+            const centerY2 = ey + nodeHeight / 2;
+            const distance = Math.sqrt(Math.pow(centerX1 - centerX2, 2) + Math.pow(centerY1 - centerY2, 2));
+            if (distance < minDistance) {
+              return true;
+            }
+          }
+          return false;
+        };
+        
+        // Helper function to find a non-overlapping position within screen bounds
+        const findNonOverlappingPosition = (desiredX, desiredY, existingNodes, maxAttempts = 50) => {
+          // Ensure desired position is within bounds first
+          let boundedDesiredX = Math.max(padding, Math.min(canvasWidth - nodeWidth - padding, desiredX));
+          let boundedDesiredY = Math.max(padding, Math.min(canvasHeight - nodeHeight - padding, desiredY));
+          
+          // Try the bounded desired position first
+          if (!checkOverlap(boundedDesiredX, boundedDesiredY, existingNodes)) {
+            return { x: boundedDesiredX, y: boundedDesiredY };
+          }
+          
+          // Try positions in a spiral pattern around the desired position
+          const spiralRadius = minDistance;
+          const maxRadius = Math.min(canvasWidth - nodeWidth - 2 * padding, canvasHeight - nodeHeight - 2 * padding) / 2;
+          let attempts = 0;
+          
+          for (let radius = spiralRadius; radius < maxRadius && attempts < maxAttempts; radius += 40) {
+            const angleSteps = Math.max(12, Math.floor(radius / 30));
+            for (let i = 0; i < angleSteps && attempts < maxAttempts; i++) {
+              const angle = (i / angleSteps) * 2 * Math.PI;
+              let x = boundedDesiredX + Math.cos(angle) * radius;
+              let y = boundedDesiredY + Math.sin(angle) * radius;
+              
+              // Ensure within bounds
+              x = Math.max(padding, Math.min(canvasWidth - nodeWidth - padding, x));
+              y = Math.max(padding, Math.min(canvasHeight - nodeHeight - padding, y));
+              
+              if (!checkOverlap(x, y, existingNodes)) {
+                return { x, y };
+              }
+              attempts++;
+            }
+          }
+          
+          // If spiral search fails, try a grid search
+          const gridStep = minDistance;
+          const startX = padding;
+          const startY = padding;
+          const endX = canvasWidth - nodeWidth - padding;
+          const endY = canvasHeight - nodeHeight - padding;
+          
+          for (let y = startY; y <= endY && attempts < maxAttempts; y += gridStep) {
+            for (let x = startX; x <= endX && attempts < maxAttempts; x += gridStep) {
+              if (!checkOverlap(x, y, existingNodes)) {
+                return { x, y };
+              }
+              attempts++;
+            }
+          }
+          
+          // Last resort: return a safe position at the edge (shouldn't happen with proper spacing)
+          return {
+            x: padding,
+            y: padding + (existingNodes.length * (nodeHeight + 20))
+          };
+        };
+        
+        // Create a beautiful hierarchical layout
+        // Level 1: Root at center
+        // Level 2: Nodes arranged in organized groups around root
+        
+        if (totalNodes <= 4) {
+          // For few nodes: simple radial layout
+          const radius = Math.min(canvasWidth, canvasHeight) * 0.25;
+          const angleStep = (2 * Math.PI) / totalNodes;
+          const startAngle = -Math.PI / 2; // Start from top
+          
+          otherNodes.forEach((node, index) => {
+            const angle = startAngle + index * angleStep;
+            const desiredX = centerX + Math.cos(angle) * radius - nodeWidth / 2;
+            const desiredY = centerY + Math.sin(angle) * radius - nodeHeight / 2;
+            const { x, y } = findNonOverlappingPosition(desiredX, desiredY, positionedNodes);
+            positionedNodes.push({ ...node, x, y });
+          });
+        } else {
+          // For more nodes: organized by theme in sectors
+          const sectors = themes.length;
+          const sectorAngle = (2 * Math.PI) / sectors;
+          const baseRadius = Math.min(canvasWidth, canvasHeight) * 0.28;
+          
+          themes.forEach((theme, themeIndex) => {
+            const themeNodes = nodesByTheme[theme];
+            const nodesInTheme = themeNodes.length;
+            
+            // Calculate sector center angle
+            const sectorCenterAngle = -Math.PI / 2 + themeIndex * sectorAngle;
+            
+            // Arrange nodes in this theme in a fan pattern
+            themeNodes.forEach((node, nodeIndex) => {
+              // Spread nodes within the sector
+              const angleSpread = sectorAngle * 0.7; // Use 70% of sector
+              const nodeAngle = sectorCenterAngle - angleSpread / 2 + (nodeIndex / (nodesInTheme - 1 || 1)) * angleSpread;
+              
+              // Vary radius slightly for visual interest
+              const radiusVariation = (nodeIndex % 2 === 0 ? 1 : 1.15);
+              const radius = baseRadius * radiusVariation;
+              
+              const desiredX = centerX + Math.cos(nodeAngle) * radius - nodeWidth / 2;
+              const desiredY = centerY + Math.sin(nodeAngle) * radius - nodeHeight / 2;
+              
+              const { x, y } = findNonOverlappingPosition(desiredX, desiredY, positionedNodes);
+              positionedNodes.push({ ...node, x, y });
+            });
+          });
+        }
+        
+        setNodes(positionedNodes);
+        
+        // Create connections from root to all other nodes
         if (root) {
-          const newConnections = newNodes
-            .filter(n => n.id !== root.id)
-            .map(n => ({ from: root.id, to: n.id }));
+          const newConnections = otherNodes.map(n => ({ from: root.id, to: n.id }));
           setConnections(newConnections);
         }
       }
@@ -260,7 +482,7 @@ const InteractiveMode = ({
               data-node-id={node.id}
               onMouseDown={(e) => handleMouseDown(e, node.id)} 
               className={`absolute transition-all duration-300 z-10 hover:z-20 group
-                ${isHeading ? 'w-[300px] h-auto' : 'w-[200px] min-h-[140px] flex flex-col rounded-2xl'}
+                ${isHeading ? 'w-[300px] h-auto' : 'w-[250px] min-h-[140px] flex flex-col rounded-2xl'}
               `}
               style={{ 
                 left: node.x, 
@@ -273,6 +495,8 @@ const InteractiveMode = ({
                   inset 0 0 20px rgba(255,255,255,0.1)
                 `,
                 transform: draggingNode?.id === node.id ? 'scale(1.05) translateY(-5px)' : 'scale(1)',
+                maxWidth: isHeading ? '300px' : '400px',
+                overflow: 'visible',
               }}
             >
               {editingNodeId === node.id && !isHeading ? (
@@ -322,7 +546,7 @@ const InteractiveMode = ({
                   <div className="h-8 px-3 flex items-center justify-between rounded-t-2xl border-b border-white/20 bg-black/10">
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 rounded-full shadow-[0_0_8px_currentColor]" style={{ backgroundColor: theme.color }}></div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider truncate max-w-[120px]" style={{ color: theme.color }}>{theme.label}</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider break-words" style={{ color: theme.color }}>{theme.label}</span>
                     </div>
                     <div className="relative" onMouseDown={(e) => e.stopPropagation()}>
                       <button 
@@ -353,7 +577,7 @@ const InteractiveMode = ({
                   </div>
 
                   <div className="flex-1 p-3 relative hover:bg-white/5 transition-colors rounded-b-2xl">
-                    <div className="text-xs font-bold text-white mb-1 truncate opacity-90">{node.title}</div>
+                    <div className="text-xs font-bold text-white mb-1 break-words opacity-90">{node.title}</div>
                     {node.type === 'image' ? (
                       <div className="w-full h-24 bg-black/20 rounded-lg flex items-center justify-center overflow-hidden border border-white/10 relative">
                         <div className="absolute inset-0 bg-gradient-to-tr from-emerald-500/20 to-transparent"></div>
@@ -370,10 +594,18 @@ const InteractiveMode = ({
                       </div>
                     ) : (
                       <textarea 
-                        className="w-full h-full bg-transparent border-none resize-none focus:outline-none text-xs font-medium text-white/80 leading-relaxed placeholder-white/30"
+                        className="w-full min-h-[60px] bg-transparent border-none resize-none focus:outline-none text-xs font-medium text-white/80 leading-relaxed placeholder-white/30 overflow-visible"
                         value={node.content}
                         spellCheck={false}
-                        onChange={(e) => { const newNodes = nodes.map(n => n.id === node.id ? { ...n, content: e.target.value } : n); setNodes(newNodes); }}
+                        rows={Math.max(3, Math.ceil(node.content.length / 40))}
+                        style={{ height: 'auto', minHeight: '60px' }}
+                        onChange={(e) => { 
+                          const newNodes = nodes.map(n => n.id === node.id ? { ...n, content: e.target.value } : n); 
+                          setNodes(newNodes);
+                          // Auto-resize textarea
+                          e.target.style.height = 'auto';
+                          e.target.style.height = Math.max(60, e.target.scrollHeight) + 'px';
+                        }}
                       />
                     )}
                   </div>

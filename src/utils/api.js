@@ -12,6 +12,10 @@ if (!serpApiKey) {
 }
 
 export const generateGeminiResponse = async (prompt) => {
+  if (!geminiApiKey) {
+    throw new Error("Gemini API key is not configured. Please set VITE_GEMINI_API_KEY in your .env file.");
+  }
+
   const delays = [1000, 2000, 4000, 8000, 16000];
   
   for (let i = 0; i <= 5; i++) {
@@ -26,15 +30,28 @@ export const generateGeminiResponse = async (prompt) => {
       );
       
       if (!response.ok) {
-        throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error?.message || `HTTP Error: ${response.status} ${response.statusText}`;
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't generate a response at this time.";
+      
+      // Check for API errors in response
+      if (data.error) {
+        throw new Error(data.error.message || "Gemini API returned an error");
+      }
+      
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        throw new Error("No response text from Gemini API");
+      }
+      
+      return text;
     } catch (error) {
       if (i === 5) {
         console.error("Gemini API Error after retries:", error);
-        return "Error connecting to AI service. Please try again.";
+        throw error; // Re-throw to let caller handle it
       }
       // Wait for the delay before retrying
       await new Promise(resolve => setTimeout(resolve, delays[i]));

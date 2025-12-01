@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   Search, Link as LinkIcon, ArrowLeft, PanelRightClose, PanelRightOpen,
   Quote, HelpCircle, Loader,
-  BrainCircuit, Layout, Scale, User, Calendar, BookOpen, Award, Sparkles
+  BrainCircuit, Layout, Scale, User, Calendar, BookOpen, Award, Sparkles, PenTool
 } from 'lucide-react';
 import GlassCard from '../ui/GlassCard';
 import Button from '../ui/Button';
@@ -16,7 +16,9 @@ const ResearchMode = ({
   articles, setArticles, 
   activeArticle, setActiveArticle,
   modules, setModules,
-  notes, setNotes
+  notes, setNotes,
+  paperDetailsCache, setPaperDetailsCache,
+  setActiveTab
 }) => {
   const [viewState, setViewState] = useState('search');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -29,14 +31,23 @@ const ResearchMode = ({
   useEffect(() => {
     if (activeArticle) {
       setViewState('reading');
-      fetchPaperDetails(activeArticle);
-      setCurrentCardIndex(0);
+      const articleId = activeArticle.id || activeArticle.title;
+      
+      // Check if we already have cached details for this article
+      if (paperDetailsCache[articleId]) {
+        setPaperDetails(paperDetailsCache[articleId]);
+        setCurrentCardIndex(0);
+      } else {
+        // Only fetch if not cached
+        fetchPaperDetails(activeArticle);
+        setCurrentCardIndex(0);
+      }
     } else {
       setViewState('search');
       setPaperDetails(null);
       setCurrentCardIndex(0);
     }
-  }, [activeArticle]);
+  }, [activeArticle, paperDetailsCache]);
 
   const fetchPaperDetails = async (article) => {
     if (!article || article.id === 'default-1') return;
@@ -55,7 +66,7 @@ Abstract/Snippet: "${article.abstract || article.summary}"
 
 Please provide a JSON object with the following structure:
 {
-  "summary": "A 2-3 paragraph comprehensive summary of the paper",
+  "summary": "A concise 4-5 sentence summary of the paper's main points, findings, and significance",
   "keyFindings": ["Finding 1", "Finding 2", "Finding 3"],
   "methodology": "Brief description of the research methodology",
   "contributions": "What this paper contributes to the field",
@@ -64,6 +75,8 @@ Please provide a JSON object with the following structure:
   "limitations": "Any limitations mentioned or apparent",
   "futureWork": "Future research directions suggested"
 }
+
+IMPORTANT: Keep the summary to exactly 4-5 sentences. Be concise and focus on the most important points.
 
 Return ONLY valid JSON, no markdown formatting.`;
 
@@ -87,11 +100,18 @@ Return ONLY valid JSON, no markdown formatting.`;
         };
       }
 
+      const articleId = article.id || article.title;
       setPaperDetails(details);
+      
+      // Cache the details so we don't need to fetch again
+      setPaperDetailsCache(prev => ({
+        ...prev,
+        [articleId]: details
+      }));
     } catch (error) {
       console.error("Failed to fetch paper details:", error);
       // Fallback to basic info
-      setPaperDetails({
+      const fallbackDetails = {
         summary: article.abstract || article.summary || "No summary available.",
         keyFindings: [],
         methodology: "Not specified",
@@ -100,7 +120,15 @@ Return ONLY valid JSON, no markdown formatting.`;
         relevance: "See summary",
         limitations: "Not specified",
         futureWork: "Not specified"
-      });
+      };
+      setPaperDetails(fallbackDetails);
+      
+      // Cache the fallback too
+      const articleId = article.id || article.title;
+      setPaperDetailsCache(prev => ({
+        ...prev,
+        [articleId]: fallbackDetails
+      }));
     } finally {
       setIsLoadingDetails(false);
     }
@@ -320,7 +348,15 @@ Return ONLY valid JSON, no markdown formatting.`;
           </div>
         </div>
         
-        <LearningModulesSidebar className="w-[380px]" modules={modules} setModules={setModules} />
+        <LearningModulesSidebar 
+          className="w-[380px]" 
+          modules={modules} 
+          setModules={setModules}
+          notes={notes}
+          articles={articles}
+          activeArticle={activeArticle}
+          setActiveArticle={setActiveArticle}
+        />
       </div>
     );
   }
@@ -335,6 +371,20 @@ Return ONLY valid JSON, no markdown formatting.`;
           </button>
           
           <div className="flex items-center gap-2 pr-2">
+            <button
+              onClick={() => {
+                if (setActiveTab && activeArticle) {
+                  // Force canvas regeneration by clearing nodes first
+                  // This ensures a new canvas is generated for the current paper
+                  setActiveTab('interactive');
+                }
+              }}
+              className="flex items-center gap-2 bg-white/40 hover:bg-white/60 text-[#1A1A2E] px-4 py-2 rounded-lg font-bold text-sm transition-all border border-white/50 hover:border-white/70 backdrop-blur-sm"
+              title="Visualize this paper in Interactive Mode"
+            >
+              <PenTool size={16} className="text-[#0937B8]" />
+              <span>Visualize Paper</span>
+            </button>
             <span className="text-xs font-bold text-[#1A1A2E]/60 uppercase tracking-wider">Reading Mode</span>
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -390,7 +440,31 @@ Return ONLY valid JSON, no markdown formatting.`;
                           </span>
                         </div>
                         <div className="mt-6 flex gap-3">
-                          <Button variant="secondary" icon={Quote} className="text-xs py-2 h-8">Cite This</Button>
+                          <Button 
+                            variant="secondary" 
+                            icon={Quote} 
+                            className="text-xs py-2 h-8"
+                            onClick={() => {
+                              const citation = `${currentArticle.author} (${currentArticle.year}). ${currentArticle.title}. ${currentArticle.journal}. ${currentArticle.doi_url || currentArticle.source_url || ''}`;
+                              navigator.clipboard.writeText(citation).then(() => {
+                                // Show a brief success message (you could add a toast notification here)
+                                const button = document.activeElement;
+                                if (button) {
+                                  const originalText = button.textContent;
+                                  button.textContent = 'Copied!';
+                                  button.style.color = '#10b981';
+                                  setTimeout(() => {
+                                    button.textContent = originalText;
+                                    button.style.color = '';
+                                  }, 2000);
+                                }
+                              }).catch(err => {
+                                console.error('Failed to copy citation:', err);
+                              });
+                            }}
+                          >
+                            Cite This
+                          </Button>
                           {(currentArticle.source_url || currentArticle.doi_url) && (
                             <a 
                               href={currentArticle.source_url || currentArticle.doi_url} 
@@ -599,8 +673,18 @@ Return ONLY valid JSON, no markdown formatting.`;
                           }
                         }}
                         onSwipeUp={() => {
-                          // Save/bookmark functionality could go here
-                          console.log('Saved card:', card.id);
+                          // Save/bookmark functionality
+                          if (activeArticle) {
+                            setArticles(prev => prev.map(article => 
+                              article.id === activeArticle.id 
+                                ? { ...article, saved: !article.saved }
+                                : article
+                            ));
+                            // Also update activeArticle if it's the same
+                            if (setActiveArticle) {
+                              setActiveArticle(prev => prev ? { ...prev, saved: !prev.saved } : null);
+                            }
+                          }
                         }}
                         style={{
                           transform: `translateX(${offset * 20}px) translateY(${Math.abs(offset) * 10}px) scale(${1 - Math.abs(offset) * 0.05})`,

@@ -14,11 +14,14 @@ const ReflectionMode = ({
   articles, 
   nodes,
   searchQuery,
-  notes
+  notes,
+  paperDetailsCache = {}
 }) => {
   const [activeSidebarTab, setActiveSidebarTab] = useState('insights');
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [isRefreshingInsights, setIsRefreshingInsights] = useState(false);
+  const [generatedInsights, setGeneratedInsights] = useState([]);
   const chatEndRef = useRef(null);
 
   const papersToDisplay = articles.length > 0 ? articles.map((article, idx) => {
@@ -29,6 +32,24 @@ const ReflectionMode = ({
       articleNotes.gaps && `Gaps: ${articleNotes.gaps}`
     ].filter(Boolean).join('\n\n');
 
+    // Use AI-generated summary from paperDetailsCache if available, otherwise use article summary
+    // Prefer AI-generated summary which has complete sentences
+    const articleId = article.id || article.title;
+    const cachedDetails = paperDetailsCache[articleId];
+    let summary = '';
+    
+    if (cachedDetails && cachedDetails.summary) {
+      // Use AI-generated summary (complete sentences, no truncation)
+      summary = cachedDetails.summary;
+    } else {
+      // Fall back to article summary, but clean up any truncation
+      summary = article.summary || '';
+      // Remove truncation markers and ensure it's a complete sentence
+      summary = summary.replace(/\.\.\./g, '').trim();
+      // If summary doesn't end with proper punctuation, it might be truncated
+      // In that case, we'll still show it but note that AI summary would be better
+    }
+
     return {
       id: article.id || `gen-${idx}`,
       title: article.title,
@@ -36,7 +57,7 @@ const ReflectionMode = ({
       year: article.year,
       journal: article.journal,
       relevance: 'neutral',
-      summary: article.summary,
+      summary: summary,
       notes: formattedNotes || "No specific notes recorded yet.",
       citation: `${article.author} (${article.year}). ${article.title}. ${article.journal}. ${article.doi_url || ''}`
     };
@@ -50,14 +71,19 @@ const ReflectionMode = ({
     .map(n => n.gaps)
     .filter(Boolean);
 
-  const insightsToDisplay = [
-    ...allImpacts.map(text => ({ text: `Thesis Impact: ${text}`, type: 'note' })),
-    ...allGaps.map(text => ({ text: `Identified Gap: ${text}`, type: 'gap' })),
-    ...nodes.filter(n => n.theme === 'thesis' || n.theme === 'insight').map(n => ({ text: n.content, type: 'node' }))
-  ];
+  const insightsToDisplay = generatedInsights.length > 0 
+    ? generatedInsights
+    : [
+        ...allImpacts.map(text => ({ text: `Thesis Impact: ${text}`, type: 'note' })),
+        ...allGaps.map(text => ({ text: `Identified Gap: ${text}`, type: 'gap' })),
+        ...nodes.filter(n => n.theme === 'thesis' || n.theme === 'insight').map(n => ({ text: n.content, type: 'node' }))
+      ];
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (chatEndRef.current) {
+      // Only scroll within the chat container, not the whole page
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
   }, [chatMessages]);
 
   const handlePersonaChat = async () => {
@@ -89,6 +115,58 @@ const ReflectionMode = ({
 
   const copyCitation = (text) => {
     navigator.clipboard.writeText(text);
+  };
+
+  const handleRefreshAnalysis = async () => {
+    setIsRefreshingInsights(true);
+    
+    try {
+      const contextArticles = papersToDisplay.map(p => `"${p.title}" by ${p.author} (${p.year})`).join(', ');
+      const contextNotes = JSON.stringify(notes);
+      const nodeThemes = nodes.map(n => `${n.title}: ${n.content}`).join('; ');
+
+      const prompt = `You are a research synthesis assistant. Analyze the following research context and generate 3-5 specific, actionable research insights or "rabbit holes" (interesting directions to explore further).
+
+RESEARCH CONTEXT:
+Topic: "${searchQuery || 'General Inquiry'}"
+Key Papers: ${contextArticles || 'None yet'}
+User's Notes: ${contextNotes || 'None yet'}
+Canvas Nodes: ${nodeThemes || 'None yet'}
+
+Generate insights that:
+1. Connect patterns across the research
+2. Identify gaps or contradictions
+3. Suggest new angles or questions to explore
+4. Are specific and actionable
+
+Return ONLY a JSON array of objects, each with "text" (the insight) and "type" (one of: "pattern", "gap", "question", "connection"). Example format:
+[{"text": "The relationship between X and Y appears inconsistent across studies", "type": "pattern"}, {"text": "No longitudinal studies found on Z", "type": "gap"}]
+
+Do not include any other text, just the JSON array.`;
+
+      const response = await generateGeminiResponse(prompt);
+      
+      // Try to parse JSON from response
+      let cleaned = response.trim();
+      cleaned = cleaned.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        cleaned = jsonMatch[0];
+      }
+      
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setGeneratedInsights(parsed);
+      } else {
+        throw new Error("Invalid response format");
+      }
+    } catch (error) {
+      console.error("Failed to refresh insights:", error);
+      // Fall back to default insights
+      setGeneratedInsights([]);
+    } finally {
+      setIsRefreshingInsights(false);
+    }
   };
 
   return (
@@ -151,13 +229,13 @@ const ReflectionMode = ({
           ))}
         </div>
 
-        <div className="flex-1 bg-white/30 backdrop-blur-xl border border-white/50 rounded-3xl shadow-xl overflow-hidden flex flex-col relative">
+        <div className="flex-1 bg-white/30 backdrop-blur-xl border border-white/50 rounded-3xl shadow-xl overflow-hidden flex flex-col relative min-h-0">
           {activeSidebarTab === 'citations' && (
             <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
               <div className="text-xs font-bold text-[#1A1A2E]/50 uppercase tracking-wider mb-2">APA Format (Generated)</div>
               {papersToDisplay.map((paper, i) => (
-                <div key={i} className="bg-white/60 p-3 rounded-xl border border-white/60 shadow-sm group hover:border-[#0937B8]/30 transition-colors">
-                  <p className="text-[11px] text-[#1A1A2E] leading-relaxed font-serif mb-2 select-all">{paper.citation}</p>
+                <div key={i} className="bg-white/60 p-3 rounded-xl border border-white/60 shadow-sm group hover:border-[#0937B8]/30 transition-colors overflow-hidden">
+                  <p className="text-[11px] text-[#1A1A2E] leading-relaxed font-serif mb-2 select-all break-words" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{paper.citation}</p>
                   <button onClick={() => copyCitation(paper.citation)} className="w-full py-1.5 rounded-lg bg-[#0937B8]/5 hover:bg-[#0937B8]/10 text-[#0937B8] text-[10px] font-bold flex items-center justify-center gap-1 transition-colors">
                     <Copy size={12}/> Copy to Clipboard
                   </button>
@@ -203,16 +281,21 @@ const ReflectionMode = ({
               </div>
               
               <div className="mt-6 text-center">
-                <button className="text-[10px] font-bold text-[#1A1A2E]/40 flex items-center justify-center gap-1 mx-auto hover:text-[#0937B8] transition-colors">
-                  <RefreshCw size={10} /> Refresh Analysis
+                <button 
+                  onClick={handleRefreshAnalysis}
+                  disabled={isRefreshingInsights}
+                  className="text-[10px] font-bold text-[#1A1A2E]/40 flex items-center justify-center gap-1 mx-auto hover:text-[#0937B8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw size={10} className={isRefreshingInsights ? 'animate-spin' : ''} /> 
+                  {isRefreshingInsights ? 'Analyzing...' : 'Refresh Analysis'}
                 </button>
               </div>
             </div>
           )}
 
           {activeSidebarTab === 'chat' && (
-            <div className="flex-1 flex flex-col h-full">
-              <div className="p-2 border-b border-white/20 bg-white/20">
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <div className="p-2 border-b border-white/20 bg-white/20 shrink-0">
                 <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar no-scrollbar">
                   {PERSONAS.map(p => (
                     <button 
@@ -230,7 +313,7 @@ const ReflectionMode = ({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar min-h-0">
                 {chatMessages.length === 0 && (
                   <div className="text-center mt-10 opacity-50">
                     <Bot size={24} className="mx-auto mb-2" />
@@ -249,10 +332,10 @@ const ReflectionMode = ({
                     <div className="bg-white p-2 rounded-xl rounded-bl-none shadow-sm"><Loader size={12} className="animate-spin text-gray-400"/></div>
                   </div>
                 )}
-                <div ref={chatEndRef} />
+                <div ref={chatEndRef} style={{ height: '1px' }} />
               </div>
 
-              <div className="p-3 bg-white/40 border-t border-white/50">
+              <div className="p-3 bg-white/40 border-t border-white/50 shrink-0">
                 <div className="flex gap-2">
                   <input 
                     className="flex-1 bg-white border-none rounded-xl px-3 py-2 text-xs focus:outline-none shadow-sm placeholder-gray-400"
