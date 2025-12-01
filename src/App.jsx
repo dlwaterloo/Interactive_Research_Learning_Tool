@@ -38,7 +38,7 @@ const App = () => {
   if (showIntro) {
     return <IntroductionScreen 
       onNavigate={handleIntroNavigation} 
-      onStart={() => handleIntroNavigation('research')} 
+      onStart={() => handleIntroNavigation('ideate')} 
       userName={userName}
       userRole={userRole}
       setUserName={setUserName}
